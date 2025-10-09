@@ -684,6 +684,16 @@ void window_frame() {
         Dvar_SetBool(m_enable, true); // enable mouse movement
     }
 
+    // First frame
+    if (window_clientStateLast == -1) {
+        window_clientStateLast = clientState; // set it now to avoid running this code again (Com_Error jumps to exception handler)
+      
+        // Check if sound is initialized properly
+        if (dedicated->value.integer == 0 && *(int*)0xc94ed4 == 0) {
+            Com_Error(ERR_DROP, "Sound system failed to initialize.\n\nThe game might crash at any time.\nPlease check your sound drivers.");
+        }
+    }
+
     window_clientStateLast = clientState;
 }
 
