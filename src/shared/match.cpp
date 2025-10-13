@@ -367,6 +367,52 @@ bool match_redownload() {
 
 
 
+void match_cancel(const char* reason) {
+    if (match.activated) {
+        match.canceling = true;
+        if (reason != nullptr && reason[0] != '\0') {
+            snprintf(match.cancelReason, sizeof(match.cancelReason), "Match was canceled. Reason: %s", reason);
+            match.cancelReason[sizeof(match.cancelReason) - 1] = '\0';
+        } else {
+            match.cancelReason[0] = '\0';
+        }
+        gsc_allowOneTimeLevelChange = true; // Allow map change for fast_restart even if level change is disabled via GSC script
+        Com_Printf("Match is being canceled...\n");
+        Cbuf_AddText("fast_restart\n");
+    } else {
+        Com_Printf("No match is currently active.\n");
+    }
+}
+
+
+
+void match_finish() {
+
+    if (match.activated && !match.canceling) 
+    {
+        // Kick all players, match is finished
+        for (int i = 0; i < sv_maxclients->value.integer; i++) {
+            client_t* client = &svs_clients[i];
+            
+            if (client && client->state) {
+                SV_DropClient(client, "\n^2Match has finished^7");
+            }
+        }
+
+        Com_Printf("======================================================\n");
+        Com_Printf("Match finished successfully.\n");
+        Com_Printf("- URL: %s\n", match.url);
+        Com_Printf("- Match ID: %s\n", match.data.match_id);
+        Com_Printf("- Teams: %s (%s) vs %s (%s)\n", match.data.team1.name, match.data.team1.id, match.data.team2.name, match.data.team2.id);
+        Com_Printf("======================================================\n");
+
+        // Cancel request
+        match_cancel(nullptr);
+    }
+}
+
+
+
 
 void match_cmd_usage() {
     Com_Printf("USAGE: match <command> <options>\n");

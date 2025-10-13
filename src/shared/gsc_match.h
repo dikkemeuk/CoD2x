@@ -17,6 +17,8 @@ void gsc_match_getData();
 void gsc_match_redownloadData();
 void gsc_match_clearData();
 void gsc_match_isActivated();
+void gsc_match_cancel();
+void gsc_match_finish();
 
 bool gsc_match_beforeMapChangeOrRestart(bool fromScript, bool bComplete, bool shutdown, sv_map_change_source_e source);
 void gsc_match_onPlayerConnect(int entnum);

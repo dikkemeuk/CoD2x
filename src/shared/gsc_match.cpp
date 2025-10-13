@@ -411,6 +411,46 @@ void gsc_match_isActivated() {
 
 
 /**
+ * Cancel the ongoing match, then doing fast_restart.
+ * When reason is provided, it will be sent to the match server as an error message.
+ * level matchCancel(<reason>);
+ */
+void gsc_match_cancel() {
+	//Com_DPrintf("gsc_match_cancel()\n");
+
+	if (!match.activated) {
+		Scr_AddBool(false);
+		return;
+	}
+
+	unsigned int numParams = Scr_GetNumParam();
+	const char* reason = (numParams >= 1) ? Scr_GetString(0) : nullptr;
+
+	match_cancel(reason);
+
+	Scr_AddBool(true);
+}
+
+
+/*
+ * Finish the match by kicking all players and cancel the match, then doing fast_restart
+ * level matchFinish();
+ */
+void gsc_match_finish() {
+	//Com_DPrintf("gsc_match_finish()\n");
+
+	if (!match.activated) {
+		Scr_AddBool(false);
+		return;
+	}
+
+	match_finish();
+
+	Scr_AddBool(true);
+}
+
+
+/**
  * Called before a map change, restart or shutdown that can be triggered from a script or a command.
  * Returns true to proceed, false to cancel the operation. Return value is ignored when shutdown is true.
  * @param fromScript true if map change was triggered from a script, false if from a command.

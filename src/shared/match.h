@@ -124,6 +124,8 @@ extern Match match;
 bool match_upload_match_data(std::function<void()> onDone = nullptr, std::function<void(const std::string&)> onError = nullptr);
 MatchPlayer* match_find_player_by_uuid(const char* uuid);
 bool match_redownload();
+void match_cancel(const char* reason);
+void match_finish();
 bool match_beforeMapChangeOrRestart(bool fromScript, bool bComplete, bool shutdown, sv_map_change_source_e source);
 void match_onStartGameType();
 void match_frame();

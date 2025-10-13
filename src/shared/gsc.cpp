@@ -67,6 +67,8 @@ scr_function_t scriptFunctions[] = {
 	{"matchRedownloadData", gsc_match_redownloadData, 0},
 	{"matchClearData", gsc_match_clearData, 0},
 	{"matchIsActivated", gsc_match_isActivated, 0},
+	{"matchCancel", gsc_match_cancel, 0},
+	{"matchFinish", gsc_match_finish, 0},
 
 	{NULL, NULL, 0}
 };
