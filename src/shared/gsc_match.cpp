@@ -260,6 +260,8 @@ void gsc_match_getSetData(int action) {
 	match.progressData.globalData["team2_name"] = match.data.team2.name;
 	match.progressData.globalData["team1_tag"] = match.data.team1.tag;
 	match.progressData.globalData["team2_tag"] = match.data.team2.tag;
+	match.progressData.globalData["format"] = match.data.format;
+	match.progressData.globalData["players_count"] = std::to_string(match.data.players_count);
 
 	// Get
 	if (action == 0) {

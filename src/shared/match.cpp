@@ -175,19 +175,31 @@ bool match_parse_json_match_data(const char* json_str, MatchData* match_data) {
 
     // matchId
     if (!json_get_str(json_str, "$.matchId", match_data->match_id, MAX_ID_LENGTH) || match_data->match_id[0] == '\0') {
-        match_data->error = "Invalid matchId '" + std::string(match_data->match_id) + "'";
+        match_data->error = "Missing or invalid 'matchId'";
         return false;
     }
 
     // format
-    /*if (!json_get_str(json_str, "$.format", match_data->format, sizeof(match_data->format))) {
-        match_data->error = "Invalid format";
+    if (!json_get_str(json_str, "$.format", match_data->format, sizeof(match_data->format))) {
+        match_data->error = "Missing or invalid 'format'";
         return false;
     }
-    if (strcmp(match_data->format, "BO1") != 0 && strcmp(match_data->format, "BO3") != 0) {
-        match_data->error = "Unsupported format (only BO1 and BO3 are supported)";
+    if (strcmp(match_data->format, "BO1") != 0 && strcmp(match_data->format, "BO3") != 0 && strcmp(match_data->format, "BO5") != 0) {
+        match_data->error = "Unsupported format (only BO1, BO3 and BO5 are supported)";
         return false;
-    }*/
+    }
+
+    // number of players
+    long players_count = 0;
+    if (!json_get_long(json_str, "$.playersCount", &players_count)) {
+        match_data->error = "Missing or invalid 'playersCount'";
+        return false;
+    }
+    if (players_count < 0 || players_count > MAX_TEAM_PLAYERS) {
+        match_data->error = "Invalid playersCount (must be between 0 and " STRINGIFY(MAX_TEAM_PLAYERS) ")";
+        return false;
+    }
+    match_data->players_count = players_count;
 
     // maps
     int map_count = 0;
@@ -226,18 +238,16 @@ bool match_parse_json_match_data(const char* json_str, MatchData* match_data) {
     }
     match_data->maps_count = map_count;
 
-    // Check no maps
-    if (map_count == 0) {
-        match_data->error = "No maps specified";
-        return false;
-    }
 
-    // Maps count related to format
-    /*if ((strcmp(match_data->format, "BO1") == 0 && map_count != 1) ||
-        (strcmp(match_data->format, "BO3") == 0 && map_count != 3)) {
-        match_data->error = "Invalid map count related to format";
-        return false;
-    }*/
+    // Maps are defined
+    if (map_count > 0) {
+        if ((strcmp(match_data->format, "BO1") == 0 && map_count != 1) ||
+            (strcmp(match_data->format, "BO3") == 0 && map_count != 3) ||
+            (strcmp(match_data->format, "BO5") == 0 && map_count != 5)) {
+            match_data->error = "Invalid map count (" + std::to_string(map_count) + ") for format '" + std::string(match_data->format) + "'";
+            return false;
+        }
+    }
 
     // Helper for teams
     auto fill_team = [&](int teamNumber, MatchTeam* team) -> bool {
@@ -302,6 +312,17 @@ bool match_parse_json_match_data(const char* json_str, MatchData* match_data) {
         return false;
     }
 
+    // Check number of players
+    if (match_data->team1.num_players < match_data->players_count) {
+        match_data->error = "Team 1 has less players than required by playersCount";
+        return false;
+    }
+    if (match_data->team2.num_players < match_data->players_count) {
+        match_data->error = "Team 2 has less players than required by playersCount";
+        return false;
+    }
+
+
     return true;
 }
 
@@ -340,17 +361,25 @@ bool match_redownload() {
             // Validate if match id and maps are the same
             if (strcmp(match.data.match_id, matchData.match_id) != 0) {
                 Com_Printf("Match redownloading error, match id does not match: %s != %s\n", match.data.match_id, matchData.match_id);
+                match_upload_error("Match redownloading error", "Match ID does not match the original one");
                 return;
             }
             if (match.data.maps_count != matchData.maps_count) {
                 Com_Printf("Match redownloading error, number of maps does not match: %d != %d\n", match.data.maps_count, matchData.maps_count);
+                match_upload_error("Match redownloading error", "Number of maps does not match the original one");
                 return;
             }
             for (int i = 0; i < match.data.maps_count; i++) {
                 if (strcmp(match.data.maps[i], matchData.maps[i]) != 0) {
                     Com_Printf("Match redownloading error, map %d does not match: %s != %s\n", i, match.data.maps[i], matchData.maps[i]);
+                    match_upload_error("Match redownloading error", "Map rotation does not match the original one");
                     return;
                 }
+            }
+            if (strncmp(match.data.format, matchData.format, sizeof(match.data.format)) != 0) {
+                Com_Printf("Match redownloading error, format does not match: %s != %s\n", match.data.format, matchData.format);
+                match_upload_error("Match redownloading error", "Match format does not match the original one");
+                return;
             }
 
             // Update match data with new data
@@ -641,7 +670,7 @@ void match_onStartGameType() {
 bool match_beforeMapChangeOrRestart(bool fromScript, bool bComplete, bool shutdown, sv_map_change_source_e source) {
 
     // Upload error about server error
-    if (shutdown && com_errorEntered && com_last_error && com_last_error[0] != '\0') {
+    if (shutdown && match.activated && com_errorEntered && com_last_error && com_last_error[0] != '\0') {
         // If there was a fatal error, we cannot upload the match data, just cancel
         match_upload_error("Server shutdown error", com_last_error);
     }

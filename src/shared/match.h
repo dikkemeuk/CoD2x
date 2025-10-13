@@ -89,9 +89,10 @@ typedef struct {
     char match_id[MAX_ID_LENGTH];
     MatchTeam team1;
     MatchTeam team2;
-    char format[64]; // BO1, BO3
+    char format[64]; // BO1, BO3, BO5
     char maps[MAX_MAPS][MAX_MAP_NAME_LENGTH]; // Up to 5 maps
     int maps_count;
+    int players_count; // number of players in team, if 0 then any number of players is allowed
 
     // Local data
     std::string json;
