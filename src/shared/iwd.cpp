@@ -1,6 +1,7 @@
 #include "iwd.h"
 #include "shared.h"
 
+#include "http_client.h"
 #if COD2X_WIN32
     #include <windows.h>
 #endif
@@ -46,8 +47,174 @@ extern "C" {
 #define NUM_IW_IWDS 25 // Original
 #define NUM_IW_COD2X_IWDS 1 // New CoD2x iwds
 
+#define ZPAM_LATEST_VERSION "zpam400_test4"
+#define ZPAM_LATEST_MAPPACK "zpam_maps_v6"
+
 extern dvar_t* g_cod2x;
 dvar_t* com_writeConfig = NULL;
+
+
+/**
+ * Cleanup test zPAM files specified in a blacklist
+ */
+static void iwd_processZpamFiles() {
+
+    // Exit if not server
+    if (Dvar_GetInt("dedicated") == 0) {
+        return;
+    }
+
+    const char* blacklist[] = {
+        "zpam400_test1.iwd", 
+        "zpam400_test2.iwd", 
+        "zpam400_test3.iwd"
+    };
+    size_t blacklistSize = sizeof(blacklist) / sizeof(blacklist[0]);
+
+    dvar_t* fs_basePath = Dvar_GetDvarByName("fs_basepath");
+    if (!fs_basePath || !fs_basePath->value.string || fs_basePath->value.string[0] == '\0') {
+        Com_Printf("zPAM cleanup: fs_basepath not set, skipping.\n");
+        return;
+    }
+
+    const char* sep = WL("\\", "/");
+    char mainDir[MAX_OSPATH * 2] = {0};
+    snprintf(mainDir, sizeof(mainDir), "%s%smain", (const char*)fs_basePath->value.string, sep);
+
+    DIR* dir = opendir(mainDir);
+    if (!dir) return;
+
+    bool downloadLatestZpam = false;
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != nullptr) {
+        const char* name = ent->d_name;
+
+        // Skip dot entries
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+
+        // Build full path and filter directories via stat
+        char fullPath[MAX_OSPATH * 2] = {0};
+        snprintf(fullPath, sizeof(fullPath), "%s%s%s", mainDir, sep, name);
+
+        struct stat st;
+        if (stat(fullPath, &st) == 0 && S_ISDIR(st.st_mode)) {
+            continue;
+        }
+
+        // Check if the file is in the blacklist
+        bool isBlacklisted = false;
+        for (size_t i = 0; i < blacklistSize; ++i) {
+            if (I_strnicmp(name, blacklist[i], strlen(blacklist[i])) == 0) {
+                isBlacklisted = true;
+                break;
+            }
+        }
+
+        if (isBlacklisted) {
+            if (remove(fullPath) == 0) {
+                Com_Printf("Deleted old zPAM file: %s\n", fullPath);
+                downloadLatestZpam = true;
+            } else {
+                Com_Error(ERR_FATAL, "Failed to delete old zPAM file: %s (errno=%d)\n", fullPath, errno);
+            }
+        }
+    }
+    closedir(dir);
+
+    if (downloadLatestZpam) {
+        Com_Printf("Downloading latest zPAM version: %s\n", ZPAM_LATEST_VERSION);
+
+        auto downloadFile = [](const char* url, const char* outputPath) {
+            HttpClient* client = new HttpClient();
+
+            // Open file for writing
+            FILE* file = fopen(outputPath, "wb");
+            if (!file) {
+                Com_Printf("Failed to open file for zPAM writing: %s\n", outputPath);
+                delete client;
+                return;
+            }
+
+            bool downloading = true;
+
+            auto closeFile = [&file]() {
+                if (file) {
+                    fclose(file);
+                    file = nullptr;
+                }
+            };
+
+            client->downloadFile(url, 
+                [file, url](const char* data, size_t length, size_t downloaded, size_t total) {
+                    static uint64_t lastPrintTime = 0;
+                    uint64_t currentTime = ticks_ms();
+
+                    // Write received data chunk to file
+                    if (file && data && length > 0) {
+                        fwrite(data, 1, length, file);
+                    }
+
+                    // Show progress only if at least 1 second has passed since the last message
+                    if (currentTime - lastPrintTime >= 1000) {
+                        lastPrintTime = currentTime;
+
+                        if (total > 0) {
+                            int progress = (int)((double)downloaded / (double)total * 100.0);
+                            Com_Printf("Downloading %s: %3d%%  %10zu / %10zu bytes\n", url, progress, downloaded, total);
+                        } else {
+                            Com_Printf("Downloading %s: %zu bytes\n", url, downloaded);
+                        }
+                    }
+                },
+                [&downloading, &closeFile, url](const HttpClient::Response& res) {
+                    downloading = false;
+                    closeFile();
+                    if (res.status == 200 || res.status == 201) {
+                        Com_Printf("Downloading %s: 100%% complete!\n", url);
+                    } else {
+                        Com_Printf("Downloading %s: zPAM download failed with status %d: %s\n", url, res.status, res.body.c_str());
+                    }
+                },
+                [&downloading, &closeFile](const std::string& error) {
+                    downloading = false;
+                    closeFile();
+                    Com_Printf("HTTP error while downloading IWD file: %s\n", error.c_str());
+                },
+                60000,  // 60 second overall timeout
+                3000   // 3 second for initial connection
+            );
+
+            // Poll for events
+            while (downloading) {
+                client->poll(50);  // Poll every 50ms for better responsiveness
+            }
+
+            delete client;
+        };
+
+        // Download zPAM mod
+        char outputPathzPAM[MAX_OSPATH * 2] = {0};
+        snprintf(outputPathzPAM, sizeof(outputPathzPAM), "%s%s%s.iwd", mainDir, sep, ZPAM_LATEST_VERSION);
+        char urlZpam[MAX_OSPATH * 2] = {0};
+        snprintf(urlZpam, sizeof(urlZpam), "http://cod2x.me/zpam/main/%s.iwd", ZPAM_LATEST_VERSION);
+        downloadFile(urlZpam, outputPathzPAM);
+
+        // Check if we need to download the mappack
+        char outputPathMappack[MAX_OSPATH * 2] = {0};
+        snprintf(outputPathMappack, sizeof(outputPathMappack), "%s%s%s.iwd", mainDir, sep, ZPAM_LATEST_MAPPACK);
+
+        // Check if the mappack file already exists
+        struct stat st;
+        if (stat(outputPathMappack, &st) != 0) {
+            // If the file does not exist, download it
+            char urlMappack[MAX_OSPATH * 2] = {0};
+            snprintf(urlMappack, sizeof(urlMappack), "http://cod2x.me/zpam/main/%s.iwd", ZPAM_LATEST_MAPPACK);
+            downloadFile(urlMappack, outputPathMappack);
+        } else {
+            Com_Printf("zPAM mappack already exists, skipping download: %s\n", outputPathMappack);
+        }
+    }
+}
 
 
 /**
@@ -307,7 +474,7 @@ char** Sys_ListFiles(char* extension, int32_t* numFiles, int32_t wantsubs) {
     }
 
     // Read value via function to get value even if dvar is not registered yet
-    bool dedicatedValue = Dvar_GetInt("dedicated");
+    int dedicatedValue = Dvar_GetInt("dedicated");
 
     // Server
     // - load all, do not filter
@@ -581,8 +748,14 @@ void FS_RegisterDvars() {
     if (iwd_firstTime) {
         iwd_firstTime = false;
 
+        // We moved loading cvars like dedicated, com_, etc here to be able to detect if its server or not
+        // Com_RegisterDvars()
+        ASM_CALL(RETURN_VOID, ADDR(0x00434040, 0x08061d90));
+
         // Cleanup old CoD2x IWD files that are no longer needed
         iwd_cleanupCoD2xIwdFiles();
+
+        iwd_processZpamFiles();
 
         // Extract embedded iw_CoD2x_01.iwd file into main folder
         iwd_extractIwdFileToMain("iw_CoD2x_01", EMBEDDED_FILE_SYMBOLS(iw_CoD2x_01_iwd));
@@ -615,6 +788,10 @@ void iwd_init() {
 
 /** Called before the entry point is called. Used to patch the memory. */
 void iwd_patch() {
+    // Nop out the call to Com_RegisterDvars
+    // Its called in FS_RegisterDvars so we can detect if its server or not
+    patch_nop(ADDR(0x0043455d, 0x0806212e), 5); 
+
     patch_call(ADDR(0x00425284, 0x080a2dfc), (unsigned int)&FS_RegisterDvars);
 
     patch_call(ADDR(0x0043bb47, 0x080654fa), (unsigned int)&WL(FS_iwIwd_Win32, FS_iwIwd_Linux));  
