@@ -44,7 +44,7 @@ void gsc_http_fetch() {
     // Increase pending requests count
     gsc_http_pending_requests++;
 
-	gsc_http_client->request(method, url, data, headers,
+	gsc_http_client->request(method, url, data, strlen(data), headers,
 		[onDoneCallback](const HttpClient::Response& res) {
             gsc_http_pending_requests--;
 
