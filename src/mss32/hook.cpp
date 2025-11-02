@@ -338,6 +338,18 @@ bool hook_patch() {
     patch_string_ptr(0x004064cb + 1, "%s: %s> ");
 
 
+
+    // How many cvars to show in console ("Too many to show" info message)
+    patch_byte(0x004065fb + 2, 60); // originally 24
+    // Detailed dvar match, number of chars to show
+    patch_byte(0x00406091 + 1, 40); // originally 24
+    // Cvar match, number of chars to show
+    patch_byte(0x00405c3c + 1, 40); // originally 24
+    // Dvar value X offset in console
+    patch_float(0x005c41a0, 340.0f); // originally 200.0f
+
+
+
     // Fix console not closing when fatal error occured for server
     patch_byte(0x0046853b, 0xeb); // je => jmp  0x74 => 0xeb
 
