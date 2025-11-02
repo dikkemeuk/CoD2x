@@ -102,15 +102,15 @@ inline void UI_DrawText(const char* text, int len, fontHandle_t* font, float x, 
 /**
  * Returns the width of the text in pixels
  */
-inline int CL_TextWidth(const char* text, int len, fontHandle_t* font) {
-    ASM_CALL_RETURN(int, 0x004126d0, 0, EDX(text), ECX(len), EAX(font))
+inline int UI_TextWidth(const char* text, int len, fontHandle_t* font, float scale) {
+    ASM_CALL_RETURN(int, 0x00532250, 3, PUSH(text), PUSH(len), PUSH(scale), ESI(font))
 }
 
 /**
  * Returns the height of the text in pixels
  */
-inline int CL_TextHeight(fontHandle_t* font) {
-    ASM_CALL_RETURN(int, 0x004126e0, 0, EAX(font))
+inline int UI_TextHeight(fontHandle_t* font, float scale) {
+    ASM_CALL_RETURN(int, 0x00532290, 1, PUSH(scale), ESI(font))
 }
 
 

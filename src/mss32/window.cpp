@@ -6,6 +6,7 @@
 
 #include "shared.h"
 #include "rinput.h"
+#include "demo.h"
 #include "../shared/cod2_dvars.h"
 #include "../shared/cod2_client.h"
 
@@ -429,6 +430,16 @@ LRESULT CALLBACK CoD2WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
             callOriginal = false;        
             break;
+        }
+
+
+        case WM_CLOSE: {
+            // Prevent the window from closing
+            if (demo_getDemoForUpload()) {
+                demo_scheduleCloseAfterUpload();
+                return 0;
+            }
+            break; // allow default handling
         }
 
 

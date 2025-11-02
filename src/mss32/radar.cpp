@@ -525,8 +525,8 @@ void radar_draw()
             // Player number text size
             const char* strNum = va("%i", playerTeamNumber);
             float textNumScale = 0.01f * player_circle_scale;
-            float textNumWidth = CL_TextWidth(strNum, 0, fontNormal) * textNumScale * playerSize * scale * 3.0;
-            float textNumHeight = CL_TextHeight(fontNormal) * textNumScale * playerSize * scale * 3.0;
+            float textNumWidth = UI_TextWidth(strNum, 0, fontNormal, textNumScale * playerSize * scale);
+            float textNumHeight = UI_TextHeight(fontNormal, textNumScale * playerSize * scale);
 
             // Draw player number
             UI_DrawText(strNum, INT_MAX, fontBig, x - textNumWidth/2.0, y + textNumHeight/2.0, horizontalAlign, verticalAlign, playerSize * textNumScale * scale, 

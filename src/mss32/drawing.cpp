@@ -2,6 +2,7 @@
 
 #include "../shared/cod2_client.h"
 #include "../shared/cod2_dvars.h"
+#include "demo.h"
 #include "radar.h"
 #include "shared.h"
 
@@ -249,6 +250,18 @@ void Sys_DirectXFatalError() {
 }
 
 
+/** This function is called after all 2D drawing is done */
+void drawing_end(int num) {
+
+    //UI_DrawText("CoD2x Mod", INT_MAX, fontNormal, 10.0f, 50.0f, HORIZONTAL_ALIGN_LEFT, VERTICAL_ALIGN_TOP, 1.0f, colWhite, TEXT_STYLE_NORMAL);
+
+    demo_drawing();
+
+    uint32_t addr = *(uint32_t*)0x0068a2b8;
+    ASM_CALL(RETURN_VOID, addr, 1, PUSH(num));
+}
+
+
 
 /** Called every frame on frame start. */
 void drawing_frame() {
@@ -289,4 +302,9 @@ void drawing_patch() {
 
     patch_call(0x004055cb, (unsigned int)CL_AddConsoleText);
     patch_call(0x00405726, (unsigned int)CL_AddConsoleText);
+
+    // Patch end view func
+    patch_call(0x00414a8c, (unsigned int)drawing_end);
+    patch_nop(0x00414a8c + 5, 1); // Nop rest of the call function, because its calling through pointer
+
 }

@@ -24,6 +24,7 @@
 #include "master_server.h"
 #include "error.h"
 #include "downloading.h"
+#include "demo.h"
 #include "debug.h"
 #include "../shared/iwd.h"
 #include "../shared/common.h"
@@ -79,6 +80,7 @@ void hook_Com_Frame()
             debug_unload();
             common_unload();
             radar_unload();
+            demo_unload();
 
             hotreload_loadDLL();
             return;
@@ -104,6 +106,7 @@ void hook_Com_Frame()
     drawing_frame();
     iwd_frame();
     radar_frame();
+    demo_frame();
 
     // Call the original function
     ASM_CALL(RETURN_VOID, 0x00434f70);
@@ -183,6 +186,7 @@ void hook_CL_Init() {
     match_init_client();
     drawing_init();
     radar_init();
+    demo_init();
     
     if (!DLL_HOTRELOAD) {
         ASM_CALL(RETURN_VOID, 0x00410a10);
@@ -294,6 +298,7 @@ bool hook_patch() {
     downloading_patch();
     drawing_patch();
     radar_patch();
+    demo_patch();
 
     // Patch server side
     common_patch();

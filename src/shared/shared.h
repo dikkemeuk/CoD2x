@@ -72,6 +72,7 @@
     #define DEBUG_RELEASE(debug, release) debug
 #else
     #define DEBUG_RELEASE(debug, release) release
+    #define DEBUG 0
 #endif
 
 
