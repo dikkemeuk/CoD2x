@@ -1,6 +1,8 @@
 #ifndef SERVER_H
 #define SERVER_H
 
+#include <cstdint>
+
 typedef enum {
 	SV_MAP_CHANGE_SOURCE_MAP,
 	SV_MAP_CHANGE_SOURCE_FAST_RESTART,
@@ -19,6 +21,17 @@ inline const char* sv_map_change_source_to_string(sv_map_change_source_e source)
         default: 								return "unknown";
     }
 }
+
+typedef struct leakyBucket_s leakyBucket_t;
+struct leakyBucket_s
+{
+	int type;
+	unsigned char adr[4];
+	uint64_t lastTime;
+	signed char	burst;
+	long hash;
+	leakyBucket_t *prev, *next;
+};
 
 void server_fix_clip_bug(bool enable);
 void server_init();

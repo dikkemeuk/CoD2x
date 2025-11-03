@@ -29,6 +29,7 @@
 dvar_t*		sv_master[MAX_MASTER_SERVERS];
 netaddr_s	masterServerAddr[MAX_MASTER_SERVERS] = { {}, {}, {} };
 dvar_t*		sv_cracked;
+dvar_t*		sv_rateLimiter;
 dvar_t*		showpacketstrings;
 dvar_t*		sv_playerBroadcastLimit;
 int 		nextIPTime = 0;
@@ -36,6 +37,151 @@ dvar_t*		g_competitive;
 bool		server_ignoreMapChangeThisFrame = false;
 
 extern dvar_t* g_cod2x;
+
+
+
+
+// ioquake3 rate limit connectionless requests
+// https://github.com/ioquake/ioq3/blob/master/code/server/sv_main.c
+// This is deliberately quite large to make it more of an effort to DoS
+#define MAX_BUCKETS	16384
+#define MAX_HASHES 1024
+
+static leakyBucket_t buckets[ MAX_BUCKETS ];
+static leakyBucket_t* bucketHashes[ MAX_HASHES ];
+leakyBucket_t outboundLeakyBucket;
+
+static long SVC_HashForAddress( netaddr_s address )
+{
+	unsigned char *ip = address.ip;
+	int	i;
+	long hash = 0;
+
+	for ( i = 0; i < 4; i++ )
+	{
+		hash += (long)( ip[ i ] ) * ( i + 119 );
+	}
+
+	hash = ( hash ^ ( hash >> 10 ) ^ ( hash >> 20 ) );
+	hash &= ( MAX_HASHES - 1 );
+
+	return hash;
+}
+
+static leakyBucket_t *SVC_BucketForAddress( netaddr_s address, int burst, int period )
+{
+	leakyBucket_t *bucket = NULL;
+	int	i;
+	long hash = SVC_HashForAddress( address );
+	uint64_t now = ticks_ms();
+
+	for ( bucket = bucketHashes[ hash ]; bucket; bucket = bucket->next )
+	{
+		if ( memcmp( bucket->adr, address.ip, 4 ) == 0 )
+		{
+			return bucket;
+		}
+	}
+
+	for ( i = 0; i < MAX_BUCKETS; i++ )
+	{
+		int interval;
+
+		bucket = &buckets[ i ];
+		interval = now - bucket->lastTime;
+
+		// Reclaim expired buckets
+		if ( bucket->lastTime > 0 && ( interval > ( burst * period ) ||
+		                               interval < 0 ) )
+		{
+			if ( bucket->prev != NULL )
+			{
+				bucket->prev->next = bucket->next;
+			}
+			else
+			{
+				bucketHashes[ bucket->hash ] = bucket->next;
+			}
+
+			if ( bucket->next != NULL )
+			{
+				bucket->next->prev = bucket->prev;
+			}
+
+			memset( bucket, 0, sizeof( leakyBucket_t ) );
+		}
+
+		if ( bucket->type == 0 )
+		{
+			bucket->type = address.type;
+			memcpy( bucket->adr, address.ip, 4 );
+
+			bucket->lastTime = now;
+			bucket->burst = 0;
+			bucket->hash = hash;
+
+			// Add to the head of the relevant hash chain
+			bucket->next = bucketHashes[ hash ];
+			if ( bucketHashes[ hash ] != NULL )
+			{
+				bucketHashes[ hash ]->prev = bucket;
+			}
+
+			bucket->prev = NULL;
+			bucketHashes[ hash ] = bucket;
+
+			return bucket;
+		}
+	}
+
+	// Couldn't allocate a bucket for this address
+	return NULL;
+}
+
+
+bool SVC_RateLimit( leakyBucket_t *bucket, int burst, int period )
+{
+	if ( bucket != NULL )
+	{
+		uint64_t now = ticks_ms();
+		int interval = now - bucket->lastTime;
+		int expired = interval / period;
+		int expiredRemainder = interval % period;
+
+		if ( expired > bucket->burst || interval < 0 )
+		{
+			bucket->burst = 0;
+			bucket->lastTime = now;
+		}
+		else
+		{
+			bucket->burst -= expired;
+			bucket->lastTime = now - expiredRemainder;
+		}
+
+		if ( bucket->burst < burst )
+		{
+			bucket->burst++;
+
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool SVC_RateLimitAddress( netaddr_s from, int burst, int period )
+{
+	if (Sys_IsLANAddress(from))
+		return false;
+
+	leakyBucket_t *bucket = SVC_BucketForAddress( from, burst, period );
+
+	return SVC_RateLimit( bucket, burst, period );
+}
+
+
+
 
 
 void SV_VoicePacket(netaddr_s from, msg_t *msg) { 
@@ -733,21 +879,44 @@ void SV_ConnectionlessPacket( netaddr_s from, msg_t *msg )
 	// CoD2x: End
 
 
+	// CoD2x: Rate limiting function
+	auto isRateLimitOk = [](leakyBucket_t* bucket, netaddr_s from, const char* action, int addrBurst, int addrPeriod, int overallBurst, int overallPeriod) -> bool 
+	{
+		if (sv_rateLimiter->value.boolean == false) {
+			return true;
+		}
+		if (SVC_RateLimitAddress(from, addrBurst, addrPeriod)) {
+			Com_DPrintf("%s: rate limit from %s exceeded, dropping request\n", action, NET_AdrToString(from));
+			return false;
+		}
+		extern leakyBucket_t outboundLeakyBucket;
+		if (SVC_RateLimit(&outboundLeakyBucket, overallBurst, overallPeriod)) {
+			Com_DPrintf("%s: overall rate limit exceeded, dropping request\n", action);
+			return false;
+		}
+		return true;
+	};
+	// CoD2x: End
+
+
 	if (Q_stricmp( c, "v") == 0)
 	{
 		SV_VoicePacket( from, msg );
 	}
 	else if (Q_stricmp( c,"getstatus") == 0)
 	{
-		SVC_Status( from  );
+		if (isRateLimitOk(&outboundLeakyBucket, from, "SV_Status", 10, 1000, 10, 100))
+			SVC_Status( from  );
 	}
 	else if (Q_stricmp( c,"getinfo") == 0)
 	{
-		SVC_Info( from );
+		if (isRateLimitOk(&outboundLeakyBucket, from, "SV_Info", 10, 1000, 10, 100))
+			SVC_Info( from );
 	}
 	else if (Q_stricmp( c,"getchallenge") == 0)
 	{
-		SV_GetChallenge( from );
+		if (isRateLimitOk(&outboundLeakyBucket, from, "SV_GetChallenge", 10, 1000, 10, 100))
+			SV_GetChallenge( from );
 	}
 	else if (Q_stricmp( c,"connect") == 0)
 	{
@@ -759,7 +928,8 @@ void SV_ConnectionlessPacket( netaddr_s from, msg_t *msg )
 	}
 	else if (Q_stricmp( c, "rcon") == 0)
 	{
-		SVC_RemoteCommand( from );
+		if (isRateLimitOk(&outboundLeakyBucket, from, "SVC_RemoteCommand", 10, 1000, 10, 1000))
+			SVC_RemoteCommand( from );
 	}
 	// CoD2x: Auto-Updater
     else if (Q_stricmp(c, "updateResponse") == 0)
@@ -1050,6 +1220,8 @@ void server_init()
 	sv_master[2] = Dvar_RegisterString("sv_master3", "", 							(dvarFlags_e)(DVAR_CHANGEABLE_RESET));
 
 	sv_cracked = Dvar_RegisterBool("sv_cracked", false, (dvarFlags_e)(DVAR_CHANGEABLE_RESET));
+
+	sv_rateLimiter = Dvar_RegisterBool("sv_rateLimiter", true, (dvarFlags_e)(DVAR_CHANGEABLE_RESET));
 
 	// If the original binary has been cracked by changing the authorize server URL, set sv_cracked to true to maintain the same behavior
 	if (strncmp(originalAuthorizeServerUrl, SERVER_ACTIVISION_AUTHORIZE_URI, 26) != 0) {
