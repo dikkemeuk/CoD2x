@@ -13,12 +13,16 @@ dvar_t* cl_vmix_webbrowser_url_prefix;
 dvar_t* cl_vmix_webbrowser_url_suffix;
 dvar_t* cl_vmix_webbrowser_sourceName;
 dvar_t* cl_vmix_scr_spectatedUserId;
+dvar_t* cl_vmix_scr_spectatedUserName;
+dvar_t* cl_vmix_scr_spectatedUserTeam;
 dvar_t* cl_vmix_scr_spectatedHWID;
-dvar_t* cl_vmix_overlayNum;
+dvar_t* cl_vmix_scr_data;
+dvar_t* cl_vmix_camera_overlayNum;
+dvar_t* cl_vmix_cameraMode;
 dvar_t* cl_vmix_playerIds;
 dvar_t* cl_vmix_player_ids[10];
 dvar_t* cl_vmix_player_sourceNames[10];
-const char* vmix_lastActiveSourceName = nullptr;
+const char* vmix_lastActiveCameraSourceName = nullptr;
 
 HttpClient* vmix_httpClient = nullptr;
 
@@ -43,13 +47,13 @@ void vmix_send_command(std::string url) {
     );
 }
 
-void vmix_send_command_overlayInputIn(const char* inputName) {
-    std::string function = "OverlayInput" + std::to_string(cl_vmix_overlayNum->value.integer) + "In"; 
+void vmix_send_command_overlayInputIn(const char* inputName, int overlayNum) {
+    std::string function = "OverlayInput" + std::to_string(overlayNum) + "In"; 
     vmix_send_command(std::string(cl_vmix_url->value.string) + "/api/?Function=" + function + "&Input=" + inputName);
 }
 
-void vmix_send_command_overlayInputOff(const char* inputName) {
-    std::string function = "OverlayInput" + std::to_string(cl_vmix_overlayNum->value.integer) + "Off"; 
+void vmix_send_command_overlayInputOff(const char* inputName, int overlayNum) {
+    std::string function = "OverlayInput" + std::to_string(overlayNum) + "Off"; 
     vmix_send_command(std::string(cl_vmix_url->value.string) + "/api/?Function=" + function + "&Input=" + inputName);
 }
 
@@ -76,12 +80,15 @@ void vmix_frame() {
         cl_vmix_scr_spectatedHWID->modified = false;
 
         const char* spectatedUserId = cl_vmix_scr_spectatedUserId->value.string;
+        const char* spectatedUserName = cl_vmix_scr_spectatedUserName->value.string;
+        const char* spectatedUserTeam = cl_vmix_scr_spectatedUserTeam->value.string;
         const char* spectatedHWID = cl_vmix_scr_spectatedHWID->value.string;
+        const char* scrData = cl_vmix_scr_data->value.string;
 
-        bool clearWebBrowser = false;
-
+        bool cameraInputActivated = false;
+        const char* foundCameraSourceName = nullptr;
+       
         // Try to find if spectated player match any of configured player IDs for cameras
-        bool foundCamera = false;
         for (int i = 0; i < 10; ++i) {
             const char *playerId = cl_vmix_player_ids[i]->value.string;
 
@@ -93,58 +100,51 @@ void vmix_frame() {
                 if (cl_vmix_debug->value.boolean)
                     Com_Printf("  Matched\n");
 
-                // Turn on new source
                 const char* sourceName = cl_vmix_player_sourceNames[i]->value.string;
-                vmix_send_command_overlayInputIn(sourceName);
 
-                if (vmix_lastActiveSourceName == cl_vmix_webbrowser_sourceName->value.string) {
-                    clearWebBrowser = true;
+                // Turn on new source
+                if (cl_vmix_cameraMode->value.integer == 1) {
+
+                    vmix_send_command_overlayInputIn(sourceName, cl_vmix_camera_overlayNum->value.integer);
+
+                    vmix_lastActiveCameraSourceName = sourceName;
+                    cameraInputActivated = true;
                 }
-
-                vmix_lastActiveSourceName = sourceName;
-                foundCamera = true;
+          
+                foundCameraSourceName = sourceName;
                 break;
             }
         }
-        
-        // Use photo via webbrowser instead
-        if (!foundCamera) {
 
-            if (spectatedUserId[0] == '\0') {
-                clearWebBrowser = true;
-            
-            } else if (cl_vmix_webbrowser_url_prefix->value.string[0] != '\0') {
-                // http://web.com/userImages/UUID
-                std::string webBrowserUrl = std::string(cl_vmix_webbrowser_url_prefix->value.string) + spectatedUserId + cl_vmix_webbrowser_url_suffix->value.string;
-                char encodedBuffer[1024];
-                size_t encodedLength = HttpClient::url_encode(webBrowserUrl.c_str(), webBrowserUrl.length(), encodedBuffer, sizeof(encodedBuffer));
-                webBrowserUrl = std::string(encodedBuffer, encodedLength);
-
-                const char* inputSourceName = cl_vmix_webbrowser_sourceName->value.string;
-
-                vmix_send_command_overlayInputIn(inputSourceName);
-                vmix_send_command_webbrowserNavigate(inputSourceName, webBrowserUrl.c_str());
-
-                vmix_lastActiveSourceName = inputSourceName;
-                foundCamera = true;
-            }
-        }
-
-        if (!foundCamera && vmix_lastActiveSourceName != nullptr) {
+        if (cameraInputActivated == false && vmix_lastActiveCameraSourceName != nullptr) {
             // Turn off last source
-            vmix_send_command_overlayInputOff(vmix_lastActiveSourceName);
+            vmix_send_command_overlayInputOff(vmix_lastActiveCameraSourceName, cl_vmix_camera_overlayNum->value.integer);
 
-            if (vmix_lastActiveSourceName == cl_vmix_webbrowser_sourceName->value.string) {
-                clearWebBrowser = true;
-            }
-
-            vmix_lastActiveSourceName = nullptr;
+            vmix_lastActiveCameraSourceName = nullptr;
         }
 
-        if (clearWebBrowser) {
-            // Clear webbrowser content by navigating to about:blank
+        
+        // Update web browser overlay
+        if (true) {
+
+            // http://web.com/userImages/photo.html#UUID|HWID|CAMERA_SOURCE|TEAM_NUM|NAME|DATA (#UUID123456|HWID123456|192.168.1.1|1|eyza|...|...|...)
+            std::string webBrowserUrl = std::string(cl_vmix_webbrowser_url_prefix->value.string);
+
+            webBrowserUrl += std::string(spectatedUserId) + "|" + spectatedHWID + "|";
+            
+            if (cl_vmix_cameraMode->value.integer == 2 && foundCameraSourceName != nullptr) {
+                webBrowserUrl += std::string(foundCameraSourceName);
+            }
+            std::string modifiedUserName = spectatedUserName;
+            std::replace(modifiedUserName.begin(), modifiedUserName.end(), '|', ' ');
+            webBrowserUrl += std::string("|") + spectatedUserTeam + "|" + modifiedUserName + "|" + scrData;
+
+            char encodedBuffer[1024];
+            size_t encodedLength = HttpClient::url_encode(webBrowserUrl.c_str(), webBrowserUrl.length(), encodedBuffer, sizeof(encodedBuffer));
+            webBrowserUrl = std::string(encodedBuffer, encodedLength);
+
             const char* inputSourceName = cl_vmix_webbrowser_sourceName->value.string;
-            vmix_send_command_webbrowserNavigate(inputSourceName, "about:blank");
+            vmix_send_command_webbrowserNavigate(inputSourceName, webBrowserUrl.c_str());
         }
 
 
@@ -152,16 +152,17 @@ void vmix_frame() {
         // VMix integration is disabled
         if (vmix_httpClient != nullptr) {
 
-            // Hide all
+            // Hide cameras
             for (int i = 0; i < 10; ++i) {
                 const char* sourceName = cl_vmix_player_sourceNames[i]->value.string;
                 if (sourceName[0] != '\0') {
-                    vmix_send_command_overlayInputOff(sourceName);
+                    vmix_send_command_overlayInputOff(sourceName, cl_vmix_camera_overlayNum->value.integer);
                 }
             }
-            const char* webbrowserSourceName = cl_vmix_webbrowser_sourceName->value.string;
-            if (webbrowserSourceName[0] != '\0') {
-                vmix_send_command_overlayInputOff(webbrowserSourceName);
+
+            // Update web browser
+            if (cl_vmix_webbrowser_sourceName->value.string[0] != '\0') {
+                vmix_send_command_webbrowserNavigate(cl_vmix_webbrowser_sourceName->value.string, cl_vmix_webbrowser_url_prefix->value.string);
             }
 
             vmix_httpClient->poll_max(200); // Poll to finish any pending requests
@@ -177,13 +178,17 @@ void vmix_init() {
     cl_vmix =                       Dvar_RegisterBool  ("cl_vmix", false, (dvarFlags_e)(DVAR_CHANGEABLE_RESET));
     cl_vmix_debug =                 Dvar_RegisterBool  ("cl_vmix_debug", false, DVAR_CHANGEABLE_RESET);
     cl_vmix_scr_spectatedUserId =   Dvar_RegisterString("cl_vmix_scr_spectatedUserId", "", DVAR_CHANGEABLE_RESET); // Cvar controlled by script
+    cl_vmix_scr_spectatedUserName = Dvar_RegisterString("cl_vmix_scr_spectatedUserName", "", DVAR_CHANGEABLE_RESET); // Cvar controlled by script
+    cl_vmix_scr_spectatedUserTeam = Dvar_RegisterString("cl_vmix_scr_spectatedUserTeam", "", DVAR_CHANGEABLE_RESET); // Cvar controlled by script
     cl_vmix_scr_spectatedHWID =     Dvar_RegisterString("cl_vmix_scr_spectatedHWID", "", DVAR_CHANGEABLE_RESET); // Cvar controlled by script
+    cl_vmix_scr_data =              Dvar_RegisterString("cl_vmix_scr_data", "", DVAR_CHANGEABLE_RESET); // Cvar controlled by script
     cl_vmix_playerIds =             Dvar_RegisterString("cl_vmix_scr_playerIds", "", DVAR_CHANGEABLE_RESET); // Cvar controlled by script
     cl_vmix_url =                   Dvar_RegisterString("cl_vmix_cfg_url", "", (dvarFlags_e)(DVAR_CHANGEABLE_RESET));
     cl_vmix_webbrowser_url_prefix = Dvar_RegisterString("cl_vmix_cfg_webbrowser_url_prefix", "", (dvarFlags_e)(DVAR_CHANGEABLE_RESET));
     cl_vmix_webbrowser_url_suffix = Dvar_RegisterString("cl_vmix_cfg_webbrowser_url_suffix", "", (dvarFlags_e)(DVAR_CHANGEABLE_RESET));
     cl_vmix_webbrowser_sourceName = Dvar_RegisterString("cl_vmix_cfg_webbrowser_sourceName", "", (dvarFlags_e)(DVAR_CHANGEABLE_RESET));
-    cl_vmix_overlayNum =            Dvar_RegisterInt   ("cl_vmix_cfg_camera_overlayNum", 1, 1, 4, (dvarFlags_e)(DVAR_CHANGEABLE_RESET)); // overlay 1-4 to use in vMix
+    cl_vmix_camera_overlayNum =     Dvar_RegisterInt   ("cl_vmix_cfg_camera_overlayNum", 1, 1, 4, (dvarFlags_e)(DVAR_CHANGEABLE_RESET)); // overlay 1-4 to use in vMix
+    cl_vmix_cameraMode =            Dvar_RegisterInt   ("cl_vmix_cfg_camera_mode", 1, 1, 2, (dvarFlags_e)(DVAR_CHANGEABLE_RESET)); // 1=source in vmix, 2=source send to browser
     cl_vmix_player_ids[0] =         Dvar_RegisterString("cl_vmix_cfg_camera_player1_id", "", (dvarFlags_e)(DVAR_CHANGEABLE_RESET));
     cl_vmix_player_sourceNames[0] = Dvar_RegisterString("cl_vmix_cfg_camera_player1_sourceName", "", (dvarFlags_e)(DVAR_CHANGEABLE_RESET));
     cl_vmix_player_ids[1] =         Dvar_RegisterString("cl_vmix_cfg_camera_player2_id", "", (dvarFlags_e)(DVAR_CHANGEABLE_RESET));
